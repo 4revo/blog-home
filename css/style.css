@@ -560,8 +560,7 @@ i.iconfont.icon-link {
 }
 
 .link-card i {
-    margin-left: 0px;
-    font-size: 1.65rem;
+    display: none;
 }
 
 .link-card:hover {
