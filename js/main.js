@@ -134,34 +134,99 @@ $('#hitokoto').click(function () {
 });
 
 //获取天气
-//请前往 https://www.mxnzp.com/doc/list 申请 app_id 和 app_secret
-//请前往 https://dev.qweather.com/ 申请 key
-const add_id = "vcpmlmqiqnjpxwq1"; // app_id
-const app_secret = "PeYnsesgkmK7qREhIFppIcsoN0ZShv3c"; // app_secret
-const key = "691d007d585841c09e9b41e79853ecc2" // key
+//定位：优先浏览器精确经纬度，失败则回退到 IP 定位
+//天气：Open-Meteo（免 API Key，实时数据）
+const WMO_TEXT = {
+    0: "晴", 1: "晴间多云", 2: "多云", 3: "阴",
+    45: "雾", 48: "雾凇",
+    51: "毛毛雨", 53: "毛毛雨", 55: "毛毛雨",
+    56: "冻毛毛雨", 57: "冻毛毛雨",
+    61: "小雨", 63: "中雨", 65: "大雨",
+    66: "冻雨", 67: "冻雨",
+    71: "小雪", 73: "中雪", 75: "大雪", 77: "雪粒",
+    80: "阵雨", 81: "阵雨", 82: "强阵雨",
+    85: "阵雪", 86: "阵雪",
+    95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "雷阵雨伴冰雹"
+};
+function wmoToText(code) {
+    return WMO_TEXT[code] || "未知";
+}
+function degToDir(deg) {
+    if (deg === null || deg === undefined || isNaN(deg)) return "";
+    const dirs = ["北", "东北", "东", "东南", "南", "西南", "西", "西北"];
+    return dirs[Math.round(deg / 45) % 8];
+}
+// 米/秒 转 风力等级
+function msToScale(ms) {
+    const t = [0.3, 1.6, 3.4, 5.5, 8.0, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7];
+    let s = 0;
+    while (s < t.length && ms >= t[s]) s++;
+    return s;
+}
+// 浏览器精确位置
+function getBrowserPosition() {
+    return new Promise(function (resolve, reject) {
+        if (!navigator.geolocation) return reject(new Error("no geolocation"));
+        navigator.geolocation.getCurrentPosition(
+            function (pos) {
+                resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+            },
+            function (err) { reject(err); },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+        );
+    });
+}
+// IP 定位兜底（含城市名）
+function getIpPosition() {
+    return fetch("https://ipwho.is/")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d && d.success !== false && d.latitude) {
+                return { lat: d.latitude, lon: d.longitude, city: d.city };
+            }
+            return fetch("https://ipapi.co/json/")
+                .then(function (r) { return r.json(); })
+                .then(function (b) {
+                    if (b && b.latitude) {
+                        return { lat: b.latitude, lon: b.longitude, city: b.city };
+                    }
+                    throw new Error("ip locate failed");
+                });
+        });
+}
 function getWeather() {
-    fetch("https://www.mxnzp.com/api/ip/self?app_id=" + add_id + "&app_secret=" + app_secret)
-        .then(response => response.json())
-        .then(data => {
-            let str = data.data.city
-            let city = str.replace(/市/g, '')
-            console.log(data,"sssss")
-            $('#city_text').html(city);
-            fetch("https://geoapi.qweather.com/v2/city/lookup?location=" + city + "&number=1&key=" + key)
-                .then(response => response.json())
-                .then(location => {
-                    let id = location.location[0].id
-                    fetch("https://devapi.qweather.com/v7/weather/now?location=" + id + "&key=" + key)
-                        .then(response => response.json())
-                        .then(weather => {
-                            $('#wea_text').html(weather.now.text)
-                            $('#tem_text').html(weather.now.temp + "°C&nbsp;")
-                            $('#win_text').html(weather.now.windDir)
-                            $('#win_speed').html(weather.now.windScale + "级")
-                        })
-                })
-        })
-        .catch(console.error);
+    $('#city_text').html("定位中");
+    $('#wea_text').html("...");
+    $('#tem_text').html("");
+    $('#win_text').html("");
+    $('#win_speed').html("");
+    (async function () {
+        let pos;
+        try {
+            pos = await getBrowserPosition();
+        } catch (e) {
+            pos = await getIpPosition();
+        }
+        $('#city_text').html(pos.city || "当前位置");
+        let url = "https://api.open-meteo.com/v1/forecast?latitude=" + pos.lat +
+            "&longitude=" + pos.lon +
+            "&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m" +
+            "&wind_speed_unit=ms&timezone=auto";
+        let res = await fetch(url);
+        let data = await res.json();
+        let cur = data.current;
+        $('#wea_text').html(wmoToText(cur.weather_code));
+        $('#tem_text').html(cur.temperature_2m + "°C&nbsp;");
+        $('#win_text').html(degToDir(cur.wind_direction_10m));
+        $('#win_speed').html(msToScale(cur.wind_speed_10m) + "级");
+    })().catch(function (err) {
+        console.error(err);
+        $('#city_text').html("天气");
+        $('#wea_text').html("加载失败");
+        $('#tem_text').html("");
+        $('#win_text').html("");
+        $('#win_speed').html("");
+    });
 }
 
 getWeather();
